@@ -4,7 +4,6 @@ Scylla — Multi-protocol credential sweep tool for NetExec (nxc).
 
 import argparse
 import asyncio
-import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -84,10 +83,19 @@ def cmd_sweep(args: argparse.Namespace) -> None:
     print_results(results, verbose=verbose, output_json=output_json)
 
 
+def _get_version() -> str:
+    try:
+        from importlib.metadata import version
+        return version("scylla-sweep")
+    except Exception:
+        return "0.1.0"
+
+
 def main() -> None:
+    VERSION = _get_version()
     parser = argparse.ArgumentParser(
         prog="scylla",
-        description="Multi-protocol credential sweep tool for NetExec (nxc).",
+        description=f"Multi-protocol credential sweep tool for NetExec (nxc).\nv{VERSION} — @NitelPhyoe",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
@@ -98,10 +106,16 @@ def main() -> None:
             "  scylla 10.0.0.5 -v\n"
             "  scylla 10.0.0.5 --json\n"
             "  scylla protocols\n"
+        "  scylla -V\n"
         ),
     )
 
     parser.add_argument("target", nargs="?", help="Target IP, CIDR range, or path to target file")
+    parser.add_argument(
+        "-V", "--version",
+        action="version",
+        version=f"%(prog)s v{VERSION} — @NitelPhyoe",
+    )
     parser.add_argument("-u", "--username", help="Username for authentication")
     parser.add_argument("-p", "--password", help="Password for authentication")
     parser.add_argument("-H", "--hash", help="NTLM hash for authentication (LM:NT)")
