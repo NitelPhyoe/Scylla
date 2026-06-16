@@ -56,6 +56,13 @@ def format_result(result: SweepResult, verbose: int = 0) -> Text:
         else:
             t.append("└─ No additional detail", style="dim white")
 
+    if verbose > 1 and result.raw_output:
+        lines = result.raw_output.splitlines()
+        for line in lines[:20]:
+            t.append("\n")
+            t.append("  │ ", style="dim")
+            t.append(line.strip(), style="dim cyan")
+
     return t
 
 
