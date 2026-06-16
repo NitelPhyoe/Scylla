@@ -13,7 +13,7 @@ Scylla is a minimal, modern CLI tool that sweeps credentials across every protoc
 ## Install
 
 ```bash
-pipx install .
+pipx install git+https://github.com/NitelPhyoe/Scylla.git
 ```
 
 Requires `netexec` (nxc) to be installed and available on PATH.
@@ -45,7 +45,3 @@ scylla sweep 10.0.0.5 -u admin -p Password123 --json
 # List available protocols
 scylla protocols
 ```
-
-## Author
-
-**Phyo Zin Khant** — [hello@phyozinkhant.dev](mailto:hello@phyozinkhant.dev) — [www.phyozinkhant.dev](https://www.phyozinkhant.dev) — [@NitelPhyoe](https://github.com/NitelPhyoe)
