@@ -1,13 +1,10 @@
 """
 Scylla — Multi-protocol credential sweep tool for NetExec (nxc).
-
-Usage:
-    scylla sweep <target> [options]
-    scylla protocols
 """
 
 import argparse
 import asyncio
+import re
 import sys
 from pathlib import Path
 from typing import Optional
@@ -57,10 +54,6 @@ def _build_credentials(args: argparse.Namespace) -> list[Optional[Credential]]:
     return results
 
 
-def cmd_protocols(args: argparse.Namespace) -> None:
-    print_protocols()
-
-
 def cmd_sweep(args: argparse.Namespace) -> None:
     targets = _parse_targets(args.target)
     credentials = _build_credentials(args)
@@ -98,60 +91,59 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "Examples:\n"
-            "  scylla sweep 10.0.0.5 -u admin -p Password123\n"
-            "  scylla sweep 10.0.0.5 -u admin -H <ntlm_hash>\n"
-            "  scylla sweep targets.txt -c creds.txt --protocols smb,winrm\n"
-            "  scylla sweep 10.0.0.5\n"
+            "  scylla 10.0.0.5 -u admin -p Password123\n"
+            "  scylla 10.0.0.5 -u admin -H <ntlm_hash>\n"
+            "  scylla 192.168.1.0/24 -c creds.txt\n"
+            "  scylla targets.txt --protocols smb,winrm,rdp\n"
+            "  scylla 10.0.0.5 -v\n"
+            "  scylla 10.0.0.5 --json\n"
+            "  scylla protocols\n"
         ),
     )
-    subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
-    # scylla protocols
-    p_protocols = subparsers.add_parser("protocols", help="List available protocols")
-
-    # scylla sweep
-    p_sweep = subparsers.add_parser("sweep", help="Sweep protocols on a target")
-    p_sweep.add_argument("target", help="Target IP, CIDR range, or path to target file")
-    p_sweep.add_argument("-u", "--username", help="Username for authentication")
-    p_sweep.add_argument("-p", "--password", help="Password for authentication")
-    p_sweep.add_argument("-H", "--hash", help="NTLM hash for authentication (LM:NT)")
-    p_sweep.add_argument(
+    parser.add_argument("target", nargs="?", help="Target IP, CIDR range, or path to target file")
+    parser.add_argument("-u", "--username", help="Username for authentication")
+    parser.add_argument("-p", "--password", help="Password for authentication")
+    parser.add_argument("-H", "--hash", help="NTLM hash for authentication (LM:NT)")
+    parser.add_argument(
         "-c", "--creds-file",
         help="Path to credentials file (user:pass per line)",
     )
-    p_sweep.add_argument(
+    parser.add_argument(
         "--protocols",
         help="Comma-separated protocol list (default: all)",
     )
-    p_sweep.add_argument(
+    parser.add_argument(
         "--timeout",
         type=int,
         default=DEFAULT_TIMEOUT,
         help=f"Timeout per protocol in seconds (default: {DEFAULT_TIMEOUT})",
     )
-    p_sweep.add_argument(
+    parser.add_argument(
         "--parallel",
         type=int,
         default=0,
         help="Max parallel protocols (default: unlimited)",
     )
-    p_sweep.add_argument(
+    parser.add_argument(
         "-v", "--verbose",
         action="count",
         default=0,
         help="Increase verbosity (-v, -vv)",
     )
-    p_sweep.add_argument(
+    parser.add_argument(
         "--json",
         action="store_true",
         help="Output results as JSON",
     )
 
     args = parser.parse_args()
-    if args.command == "protocols":
-        cmd_protocols(args)
-    elif args.command == "sweep":
-        # Parse comma-separated protocols
+
+    if args.target == "protocols":
+        print_protocols()
+        return
+
+    if args.target:
         if args.protocols:
             args.protocols = [p.strip() for p in args.protocols.split(",")]
         cmd_sweep(args)
