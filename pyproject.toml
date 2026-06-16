@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "scylla-sweep"
+version = "0.1.0"
+description = "Multi-protocol credential sweep tool for NetExec (nxc)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Phyo Zin Khant", email = "hello@phyozinkhant.dev" },
+]
+keywords = ["pentest", "netexec", "nxc", "credential", "sweep", "protocol"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Security",
+]
+dependencies = ["rich>=13.0"]
+
+[project.scripts]
+scylla = "scylla.cli:main"
+
+[project.urls]
+Repository = "https://github.com/NitelPhyoe/scylla"
+
+[tool.hatch.build.targets.wheel]
+packages = ["scylla"]
