@@ -1,24 +1,11 @@
 import json
-from dataclasses import dataclass, field
-from typing import Optional
 
 from rich.console import Console
-from rich.live import Live
 from rich.table import Table
 from rich.text import Text
-from rich.tree import Tree
 
 from .config import PROTOCOL_COLORS
 from .models import ProtocolStatus, SweepResult
-
-
-@dataclass
-class _ProgressTracker:
-    """Tracks per-protocol progress for live output."""
-
-    total: int = 0
-    done: int = 0
-    statuses: dict[str, tuple[ProtocolStatus, Optional[SweepResult]]] = field(default_factory=dict)
 
 
 STATUS_SYMBOLS = {
@@ -39,6 +26,11 @@ STATUS_LABELS = {
     ProtocolStatus.SKIPPED: "Skipped",
 }
 
+_SHOWN_STATUSES = {
+    ProtocolStatus.AUTHENTICATED,
+    ProtocolStatus.OPEN,
+}
+
 
 def format_result(result: SweepResult, verbose: int = 0) -> Text:
     color = PROTOCOL_COLORS.get(result.protocol, "white")
@@ -55,10 +47,14 @@ def format_result(result: SweepResult, verbose: int = 0) -> Text:
 
     if result.status == ProtocolStatus.AUTHENTICATED and result.access_level:
         t.append(f" [{result.access_level}]", style="bold green")
-    elif result.detail and result.detail not in ("Listening", "No response"):
-        if verbose > 0:
-            t.append(f"  — ", style="dim")
-            t.append(f"{result.detail}", style="dim white")
+
+    if verbose > 0:
+        t.append("\n")
+        t.append("  ", style="dim")
+        if result.detail:
+            t.append(f"└─ {result.detail}", style="dim white")
+        else:
+            t.append("└─ No additional detail", style="dim white")
 
     return t
 
@@ -86,54 +82,21 @@ def print_results(results: list[SweepResult], verbose: int = 0, output_json: boo
         console.print(json.dumps(data, indent=2))
         return
 
-    for r in results:
+    visible = [r for r in results if r.status in _SHOWN_STATUSES]
+
+    for r in visible:
         console.print(format_result(r, verbose=verbose))
 
     success_count = sum(1 for r in results if r.success)
     total = len(results)
+    console.print()
     if success_count == 0:
         text = Text(f"  {success_count}/{total} protocols accessible", style="bold red")
     elif success_count == total:
         text = Text(f"  {success_count}/{total} all open! ", style="bold green")
     else:
         text = Text(f"  {success_count}/{total} protocols accessible", style="bold yellow")
-    console.print()
     console.print(text)
-
-
-def print_table(results: list[SweepResult], verbose: int = 0) -> None:
-    """Alternative: render results as a Rich table."""
-    console = Console()
-    table = Table(box=None, show_header=False, padding=(0, 1))
-
-    table.add_column("Icon", style="bold", no_wrap=True)
-    table.add_column("Protocol", no_wrap=True)
-    table.add_column("Target", no_wrap=True)
-    table.add_column("Credential", no_wrap=True)
-    table.add_column("Status", no_wrap=True)
-    if verbose > 0:
-        table.add_column("Detail", no_wrap=True)
-
-    for r in results:
-        color = PROTOCOL_COLORS.get(r.protocol, "white")
-        symbol, style = STATUS_SYMBOLS.get(r.status, ("?", "dim white"))
-        label = STATUS_LABELS.get(r.status, "Unknown")
-        cred_str = r.credential.mask_password() if r.credential else "<no-auth>"
-
-        row = [
-            Text("●", style=f"bold {color}"),
-            Text(r.protocol.upper(), style=f"bold {color}"),
-            Text(r.target.host, style="white"),
-            Text(cred_str, style="dim"),
-            Text(f"{symbol} {label}", style=style),
-        ]
-        if verbose > 0 and r.detail:
-            row.append(Text(r.detail, style="dim white"))
-        elif verbose > 0:
-            row.append(Text(""))
-        table.add_row(*row)
-
-    console.print(table)
 
 
 def print_protocols() -> None:
