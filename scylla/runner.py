@@ -1,6 +1,5 @@
 import asyncio
-import json
-import shlex
+import re
 from typing import Optional
 
 from .config import PROTOCOLS, DEFAULT_TIMEOUT, Protocol
@@ -19,47 +18,74 @@ def _build_nxc_args(
             cmd.extend(["-H", cred.ntlm_hash])
         elif cred.password:
             cmd.extend(["-p", cred.password])
-    cmd.extend(["--json"])
     return cmd
 
 
-def _infer_status(stderr: str, stdout: str) -> tuple[ProtocolStatus, str]:
-    lower_stderr = stderr.lower()
-    lower_stdout = stdout.lower()
+def _infer_status(output: str) -> tuple[ProtocolStatus, str]:
+    """Parse nxc's stderr output to determine protocol status.
 
-    if "access denied" in lower_stderr:
-        return ProtocolStatus.ERROR, "Access denied"
-    if "connection refused" in lower_stderr or "connection refused" in lower_stdout:
-        return ProtocolStatus.CLOSED, "Connection refused"
-    if "connection timed out" in lower_stderr or "name or service not known" in lower_stderr:
-        return ProtocolStatus.ERROR, "Connection timeout"
-    if "timed out" in lower_stderr:
-        return ProtocolStatus.CLOSED, "Timed out"
-    if "module not found" in lower_stderr or "is not a valid protocol" in lower_stderr:
+    nxc writes everything to stderr using markers:
+      [*] banner / info
+      [+] success / authenticated
+      [-] failure / access denied / login failed
+    """
+    lower = output.lower()
+
+    # Error conditions
+    if "module '" in lower and "' not found" in lower:
         return ProtocolStatus.ERROR, "Protocol unavailable"
-    if "could not connect" in lower_stderr:
+    if "is not a valid protocol" in lower:
+        return ProtocolStatus.ERROR, "Protocol unavailable"
+    if "connection refused" in lower:
+        return ProtocolStatus.CLOSED, "Connection refused"
+    if "timed out" in lower:
+        return ProtocolStatus.CLOSED, "Timed out"
+    if "could not connect" in lower:
         return ProtocolStatus.CLOSED, "Could not connect"
-    if "requires" in lower_stderr and "argument" in lower_stderr:
+    if "name or service not known" in lower:
+        return ProtocolStatus.ERROR, "Unknown host"
+    if "no route to host" in lower:
+        return ProtocolStatus.CLOSED, "No route to host"
+    if "requires" in lower and "argument" in lower:
         return ProtocolStatus.ERROR, "Missing required argument"
 
-    try:
-        if stdout.strip():
-            lines = stdout.strip().splitlines()
-            for line in lines:
-                data = json.loads(line)
-                if (
-                    data.get("logged_in") is True
-                    or data.get("authenticated") is True
-                ):
-                    detail = data.get("detail", "")
-                    if "Pwn3d!" in stdout:
-                        detail = "Admin (Pwn3d!)"
-                    return ProtocolStatus.AUTHENTICATED, detail
-    except (json.JSONDecodeError, KeyError):
-        pass
+    # Look for [+] success markers (auth success, share listing, etc.)
+    if re.search(r'\[\+\]', output):
+        detail = ""
+        # Extract useful detail from [+] lines
+        for line in output.splitlines():
+            if "[+]" in line:
+                detail = line.split("[+]", 1)[1].strip()
+                break
+        if "Pwn3d!" in output:
+            detail = "Admin (Pwn3d!)"
+        return ProtocolStatus.AUTHENTICATED, detail
 
-    if stdout.strip():
-        return ProtocolStatus.OPEN, "Listening"
+    # Look for [-] failure markers with creds (wrong password, access denied)
+    if re.search(r'\[\-\]', output):
+        detail = ""
+        for line in output.splitlines():
+            if "[-]" in line:
+                detail = line.split("[-]", 1)[1].strip()
+                break
+        if "access denied" in lower:
+            return ProtocolStatus.ERROR, "Access denied"
+        if "logon failure" in lower or "login failure" in lower:
+            return ProtocolStatus.ERROR, "Login failed"
+        return ProtocolStatus.ERROR, detail or "Failed"
+
+    # Look for [*] marker — means the protocol responded (banner info)
+    if re.search(r'\[\*\]', output):
+        detail = ""
+        for line in output.splitlines():
+            if "[*]" in line:
+                detail = line.split("[*]", 1)[1].strip()
+                break
+        return ProtocolStatus.OPEN, detail or "Listening"
+
+    # If we got any output at all, the host is probably reachable
+    if output.strip():
+        return ProtocolStatus.OPEN, "Responded"
     return ProtocolStatus.CLOSED, "No response"
 
 
@@ -79,14 +105,15 @@ async def _run_single(
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(), timeout=timeout
         )
-        stdout = stdout_bytes.decode("utf-8", errors="replace")
+        # nxc outputs everything to stderr, stdout is almost always empty
         stderr = stderr_bytes.decode("utf-8", errors="replace")
+        stdout = stdout_bytes.decode("utf-8", errors="replace")
+        output = stderr + stdout
     except asyncio.TimeoutError:
-        if hasattr(proc, "kill"):
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+        try:
+            proc.kill()
+        except (ProcessLookupError, UnboundLocalError):
+            pass
         return SweepResult(
             target=target,
             credential=cred,
@@ -103,14 +130,14 @@ async def _run_single(
             detail="nxc not found on PATH",
         )
 
-    status, detail = _infer_status(stderr, stdout)
+    status, detail = _infer_status(output)
     return SweepResult(
         target=target,
         credential=cred,
         protocol=proto.name,
         status=status,
         detail=detail,
-        raw_output=stdout.strip() + stderr.strip(),
+        raw_output=output.strip(),
     )
 
 
