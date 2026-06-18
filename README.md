@@ -11,7 +11,7 @@ Scylla is a minimal, modern CLI tool that sweeps credentials across every protoc
 ## Install
 
 ```bash
-pipx install .
+pipx install git+https://github.com/NitelPhyoe/Scylla.git
 ```
 
 Requires `netexec` (nxc) to be installed and available on PATH.
