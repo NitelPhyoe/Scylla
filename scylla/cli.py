@@ -4,6 +4,7 @@ Scylla — Multi-protocol credential sweep tool for NetExec (nxc).
 
 import argparse
 import asyncio
+import ipaddress
 import sys
 from pathlib import Path
 from typing import Optional
@@ -24,17 +25,42 @@ def _parse_creds_file(path: str) -> list[Credential]:
     return creds
 
 
-def _parse_targets(source: str) -> list[Target]:
-    path = Path(source)
-    if path.exists():
-        targets: list[Target] = []
-        with open(path) as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    targets.append(Target(host=line))
-        return targets
-    return [Target(host=source)]
+# ponytail: hard cap on CIDR expansion; drop the cap once streaming/sweeping scales past it
+MAX_HOSTS_PER_NETWORK = 4096
+
+
+def _parse_targets(sources: list[str]) -> list[Target]:
+    targets: list[Target] = []
+    seen: set[str] = set()
+
+    def _add(host: str) -> None:
+        if host not in seen:
+            seen.add(host)
+            targets.append(Target(host=host))
+
+    for source in sources:
+        path = Path(source)
+        if path.exists():
+            with open(path) as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        _add(line)
+            continue
+        # CIDR/network range → expand to individual hosts
+        try:
+            net = ipaddress.ip_network(source, strict=False)
+        except ValueError:
+            _add(source)
+            continue
+        if net.num_addresses - 2 > MAX_HOSTS_PER_NETWORK:
+            raise ValueError(
+                f"{source} expands to {net.num_addresses - 2} hosts "
+                f"(max {MAX_HOSTS_PER_NETWORK})"
+            )
+        for ip in net.hosts():
+            _add(str(ip))
+    return targets
 
 
 def _build_credentials(args: argparse.Namespace) -> list[Optional[Credential]]:
@@ -54,7 +80,11 @@ def _build_credentials(args: argparse.Namespace) -> list[Optional[Credential]]:
 
 
 def cmd_sweep(args: argparse.Namespace) -> None:
-    targets = _parse_targets(args.target)
+    try:
+        targets = _parse_targets(args.targets)
+    except ValueError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
     credentials = _build_credentials(args)
     try:
         protocols = resolve_protocols(args.protocols)
@@ -77,6 +107,7 @@ def cmd_sweep(args: argparse.Namespace) -> None:
             protocols=protocols,
             timeout=timeout,
             max_parallel=max_parallel,
+            local_auth=args.local_auth,
         )
     )
 
@@ -86,7 +117,7 @@ def cmd_sweep(args: argparse.Namespace) -> None:
 def _get_version() -> str:
     try:
         from importlib.metadata import version
-        return version("scylla-sweep")
+        return version("scylla")
     except Exception:
         return "0.1.0"
 
@@ -101,7 +132,9 @@ def main() -> None:
             "Examples:\n"
             "  scylla 10.0.0.5 -u admin -p Password123\n"
             "  scylla 10.0.0.5 -u admin -H <ntlm_hash>\n"
+            "  scylla 10.0.0.5 -u admin -p Password123 --local-auth\n"
             "  scylla 192.168.1.0/24 -c creds.txt\n"
+            "  scylla 10.0.0.5 10.0.0.6 192.168.1.0/24 targets.txt\n"
             "  scylla targets.txt --protocols smb,winrm,rdp\n"
             "  scylla 10.0.0.5 -v\n"
             "  scylla 10.0.0.5 --json\n"
@@ -110,7 +143,10 @@ def main() -> None:
         ),
     )
 
-    parser.add_argument("target", nargs="?", help="Target IP, CIDR range, or path to target file")
+    parser.add_argument(
+        "targets", nargs="*",
+        help="Targets: IP, hostname, CIDR range, and/or target files (space-separated)",
+    )
     parser.add_argument(
         "-V", "--version",
         action="version",
@@ -122,6 +158,11 @@ def main() -> None:
     parser.add_argument(
         "-c", "--creds-file",
         help="Path to credentials file (user:pass per line)",
+    )
+    parser.add_argument(
+        "--local-auth",
+        action="store_true",
+        help="Authenticate as a local user (passed through to nxc)",
     )
     parser.add_argument(
         "--protocols",
@@ -153,11 +194,11 @@ def main() -> None:
 
     args = parser.parse_args()
 
-    if args.target == "protocols":
+    if args.targets == ["protocols"]:
         print_protocols()
         return
 
-    if args.target:
+    if args.targets:
         if args.protocols:
             args.protocols = [p.strip() for p in args.protocols.split(",")]
         cmd_sweep(args)

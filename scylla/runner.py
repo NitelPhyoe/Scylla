@@ -10,6 +10,7 @@ def _build_nxc_args(
     proto: Protocol,
     target: Target,
     cred: Optional[Credential],
+    local_auth: bool = False,
 ) -> list[str]:
     cmd = ["nxc", proto.name, target.host]
     if cred:
@@ -18,6 +19,8 @@ def _build_nxc_args(
             cmd.extend(["-H", cred.ntlm_hash])
         elif cred.password:
             cmd.extend(["-p", cred.password])
+    if local_auth:
+        cmd.append("--local-auth")
     return cmd
 
 
@@ -94,8 +97,9 @@ async def _run_single(
     target: Target,
     cred: Optional[Credential],
     timeout: int,
+    local_auth: bool = False,
 ) -> SweepResult:
-    cmd = _build_nxc_args(proto, target, cred)
+    cmd = _build_nxc_args(proto, target, cred, local_auth=local_auth)
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -153,6 +157,7 @@ async def sweep(
     protocols: list[Protocol],
     timeout: int = DEFAULT_TIMEOUT,
     max_parallel: int = 0,
+    local_auth: bool = False,
 ) -> list[SweepResult]:
     results: list[SweepResult] = []
     semaphore = asyncio.Semaphore(max_parallel) if max_parallel > 0 else None
@@ -168,8 +173,8 @@ async def sweep(
             )
         if semaphore:
             async with semaphore:
-                return await _run_single(proto, target, cred, timeout)
-        return await _run_single(proto, target, cred, timeout)
+                return await _run_single(proto, target, cred, timeout, local_auth=local_auth)
+        return await _run_single(proto, target, cred, timeout, local_auth=local_auth)
 
     tasks = []
     for target in targets:
